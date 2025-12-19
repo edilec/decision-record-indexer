@@ -289,9 +289,25 @@ async function collectRecordFiles(rootReal, limits, collector) {
         await walk(realPath, childRelative, depth + 1)
         continue
       }
-      if (!info.isFile()) continue
       if (!RECORD_EXTENSIONS.includes(extname(entry.name).toLowerCase())) continue
       if (SKIPPED_FILENAMES.includes(entry.name.toLowerCase())) continue
+
+      // An entry named like a record that is not a regular file -- a FIFO, a
+      // socket, a device node -- cannot be read as one, and reading from it
+      // could block forever. Dropping it in silence would leave an unexamined
+      // record-shaped entry inside a passing run, so it is reported and the
+      // run is incomplete. Entries that are not record-shaped stay skipped in
+      // silence: they were never candidates.
+      if (!info.isFile()) {
+        record(collector, {
+          file: childRelative,
+          ruleId: 'record-unreadable',
+          message: 'Entry is named like a record but is not a regular file, so nothing could be read from it.',
+          suggestion: 'Remove the entry, or replace it with a regular Markdown file.',
+        })
+        collector.incomplete = true
+        continue
+      }
 
       if (files.length >= limits.maxRecords) {
         record(collector, {

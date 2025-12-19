@@ -16,6 +16,10 @@ The tool walks the directory given as `--root` and reads files ending in `.md` o
   contents never reach the report or the index.
 - A real path already seen is not read twice, so a symbolic link inside the root cannot duplicate a
   record or loop a directory walk.
+- An entry whose name matches the record convention but that is not a regular file — a FIFO, a
+  socket, a device node — is reported as `record-unreadable` and makes the run `incomplete`. It is
+  never opened: reading one can block forever, and an unexamined record-shaped entry must not sit
+  inside a passing run. An entry that is not record-shaped is skipped in silence, as above.
 - File bytes are decoded with `TextDecoder('utf-8', { fatal: true })`. Whether bytes are UTF-8 is
   the decoder's decision; the decoded text is never inspected to make that judgement.
 
@@ -110,7 +114,7 @@ and inventing one would misrepresent the history.
 | `record-id-missing` | error | The record declares no id, so nothing can reference it. |
 | `record-not-utf8` | error | The bytes are not valid UTF-8; the record was not parsed. |
 | `record-too-large` | error | The record exceeds `maxRecordBytes` and was not parsed. |
-| `record-unreadable` | error | A file or directory could not be read or resolved. |
+| `record-unreadable` | error | A file or directory could not be read or resolved, or a record-shaped entry is not a regular file. |
 | `section-missing` | warning | A required section heading is absent. |
 | `status-missing` | error | The record declares no status. |
 | `status-supersession-mismatch` | warning | Status and the supersession graph disagree. |

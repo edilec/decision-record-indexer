@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import {
   DEFAULT_LIMITS,
@@ -30,6 +32,13 @@ async function withTemporary(run) {
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+}
+
+const execFileAsync = promisify(execFile)
+
+/** A named pipe: an entry that looks like a record and can never be read as one. */
+async function makeFifo(path) {
+  await execFileAsync('mkfifo', [path])
 }
 
 async function writeRecord(root, name, lines) {
@@ -331,6 +340,30 @@ test('evidence that could not be obtained is incomplete, never a pass', async (t
       )
       assert.equal(report.summary.checked, 1)
       await chmod(locked, 0o600)
+    })
+  })
+
+  await t.test('an entry named like a record that is not a regular file', { skip: process.platform === 'win32' }, async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await makeFifo(join(directory, '0002-pipe.md'))
+
+      const { report, index } = await indexDecisionRecords({ root: directory })
+
+      // Silently dropping this entry would report a clean bill of health over a
+      // root holding a record-shaped thing nobody examined.
+      assert.equal(report.status, 'incomplete')
+      assert.notEqual(report.status, 'pass')
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId, finding.severity]),
+        [['0002-pipe.md', 'record-unreadable', 'error']],
+      )
+      assert.equal(
+        report.findings[0].message,
+        'Entry is named like a record but is not a regular file, so nothing could be read from it.',
+      )
+      assert.equal(index.complete, false)
+      assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001'])
     })
   })
 

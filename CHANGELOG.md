@@ -36,6 +36,9 @@ All notable changes to this project are documented in this file.
 - real-path containment for every entry under the root, so a symbolic link to a
   file or a directory outside the tree is refused unread and none of its content
   reaches the report or the index;
+- `record-unreadable` for an entry named like a record that is not a regular
+  file — a FIFO, a socket, a device node — which is reported and makes the run
+  `incomplete` rather than being dropped in silence inside a passing run;
 - a CLI with `--help`, `--json`, `--index`, `--section` and the limit flags, the
   report on stdout, diagnostics on stderr, and exit codes 0 / 1 / 2 — with an
   empty stdout for a configuration error and an `incomplete` report for evidence
