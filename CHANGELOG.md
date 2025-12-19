@@ -42,7 +42,8 @@ All notable changes to this project are documented in this file.
 - a CLI with `--help`, `--json`, `--index`, `--section` and the limit flags, the
   report on stdout, diagnostics on stderr, and exit codes 0 / 1 / 2 — with an
   empty stdout for a configuration error and an `incomplete` report for evidence
-  that could not be obtained;
+  that could not be obtained, and with a repeated value-carrying flag refused as
+  a configuration error instead of silently overwriting the earlier value;
 - runnable clean and deliberately broken example record sets; the broken set
   spreads its findings over five files, so the documented finding order is
   demonstrated as well as the rules;

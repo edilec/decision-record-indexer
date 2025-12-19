@@ -147,9 +147,11 @@ Every limit is enforced where it is documented and has a test that fails if the 
 removed. Exceeding a limit is always an explicit finding and an `incomplete` report — never a
 silently shorter answer, and never a pass.
 
-An unknown limit name, an unknown option key, a duplicate required section and an unknown search key
-are all refused as configuration errors. A one-character typo must not quietly turn a real failure
-into a green run.
+An unknown limit name, an unknown option key, a duplicate required section, an unknown search key
+and a value-carrying CLI flag given more than once are all refused as configuration errors. A
+one-character typo must not quietly turn a real failure into a green run, and neither must a value
+the caller can no longer see: `--root a --root b` and `--max-records 5 --max-records 1` are refused
+rather than resolved by last-wins. `--section` is repeatable by design and declares the whole set.
 
 ## Report
 

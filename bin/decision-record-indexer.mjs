@@ -32,6 +32,10 @@ Options:
   --max-chain-depth N        Maximum supersession traversal depth (default 64)
   -h, --help                 Show this help
 
+Every option that carries a value may be given only once: a repeated flag is a
+configuration error, not a silent last-wins. --section is the exception, and is
+repeated to declare the whole required-section set.
+
 Records are read, never written. A superseded decision stays exactly as it is
 and stays in the index, with its successor recorded as "current"; the index is
 a derived artifact and the destination is refused if it lies inside --root.
@@ -57,6 +61,21 @@ const LIMIT_FLAGS = new Map([
 function parseArguments(argv) {
   if (argv.includes('-h') || argv.includes('--help')) return { help: true }
   const options = { root: null, index: null, json: false, sections: null, limits: {} }
+  const given = new Set()
+
+  /**
+   * A flag that carries a value is accepted once.
+   *
+   * Letting it repeat means the earlier value is discarded with no diagnostic,
+   * so `--max-records 5 --max-records 1` runs a limit nobody asked for and
+   * `--root a --root b` checks a directory nobody named. That is the same
+   * defect as an ignored typo, which this tool already refuses. `--section` is
+   * the documented exception: repeating it declares a set.
+   */
+  const once = (name) => {
+    if (given.has(name)) throw new Error(`${name} was given more than once`)
+    given.add(name)
+  }
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
@@ -68,12 +87,17 @@ function parseArguments(argv) {
     }
 
     if (argument === '--json') options.json = true
-    else if (argument === '--root') options.root = takeValue('--root')
-    else if (argument === '--index') options.index = takeValue('--index')
-    else if (argument === '--section') {
+    else if (argument === '--root') {
+      once('--root')
+      options.root = takeValue('--root')
+    } else if (argument === '--index') {
+      once('--index')
+      options.index = takeValue('--index')
+    } else if (argument === '--section') {
       if (options.sections === null) options.sections = []
       options.sections.push(takeValue('--section'))
     } else if (LIMIT_FLAGS.has(argument)) {
+      once(argument)
       const raw = takeValue(argument)
       if (!/^\d+$/.test(raw) || Number(raw) < 1) throw new Error(`${argument} requires a positive integer`)
       options.limits[LIMIT_FLAGS.get(argument)] = Number(raw)

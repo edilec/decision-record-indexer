@@ -128,6 +128,64 @@ test('a missing or unusable root is a configuration error with no report', async
   })
 })
 
+test('a flag that carries a value is accepted once, never silently last-wins', async (t) => {
+  // A repeated flag used to overwrite the earlier value with no diagnostic, so
+  // the run was configured by something the caller could not see in their own
+  // command line: --root a --root b checked a directory nobody named, and
+  // --max-records 5 --max-records 1 applied a limit nobody asked for.
+  await t.test('--root twice', async () => {
+    await withTemporary(async (directory) => {
+      const result = await cli(['--root', directory, '--root', CLEAN_ROOT, '--json'])
+      assert.equal(result.code, 2)
+      assert.equal(result.stdout, '')
+      assert.equal(result.stderr.startsWith('--root was given more than once'), true)
+    })
+  })
+
+  await t.test('--index twice', async () => {
+    await withTemporary(async (directory) => {
+      const result = await cli([
+        '--root', CLEAN_ROOT,
+        '--index', join(directory, 'one.json'),
+        '--index', join(directory, 'two.json'),
+      ])
+      assert.equal(result.code, 2)
+      assert.equal(result.stdout, '')
+      assert.equal(result.stderr.startsWith('--index was given more than once'), true)
+      assert.deepEqual(await readdir(directory), [])
+    })
+  })
+
+  await t.test('a limit flag twice', async () => {
+    const result = await cli(['--root', CLEAN_ROOT, '--json', '--max-records', '5', '--max-records', '1'])
+    assert.equal(result.code, 2)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr.startsWith('--max-records was given more than once'), true)
+  })
+
+  await t.test('--section stays repeatable and every value is applied', async () => {
+    // Refusing this would be an over-correction: --section declares a set.
+    await withTemporary(async (directory) => {
+      await writeFile(join(directory, '0001-a.md'), RECORD, 'utf8')
+      const result = await cli([
+        '--root', directory, '--json',
+        '--section', 'Context', '--section', 'Rollback plan', '--section', 'Sign-off',
+      ])
+      assert.equal(result.code, 0)
+      assert.deepEqual(
+        JSON.parse(result.stdout).findings.map((finding) => finding.location.pointer),
+        ['/sections/rollback plan', '/sections/sign-off'],
+      )
+    })
+  })
+
+  await t.test('--json twice is the same switch, not a discarded value', async () => {
+    const result = await cli(['--root', CLEAN_ROOT, '--json', '--json'])
+    assert.equal(result.code, 0)
+    assert.equal(JSON.parse(result.stdout).status, 'pass')
+  })
+})
+
 test('an empty archive exits 2 with an incomplete report on stdout', async () => {
   await withTemporary(async (directory) => {
     const result = await cli(['--root', directory, '--json'])

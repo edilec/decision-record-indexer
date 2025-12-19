@@ -60,7 +60,9 @@ decision-record-indexer --root docs/decisions --section Context --section "Rollb
   -h, --help                 Show this help
 ```
 
-stdout carries the report and nothing else; diagnostics go to stderr.
+stdout carries the report and nothing else; diagnostics go to stderr. Every option that carries a
+value may be given only once — a repeated flag is a configuration error rather than a silent
+last-wins — and `--section` is the exception, repeated to declare the whole required-section set.
 
 | Exit | Meaning | stdout |
 | ---: | --- | --- |
