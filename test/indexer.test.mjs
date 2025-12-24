@@ -291,6 +291,87 @@ test('a root holding only unindexable files is incomplete, not a pass', async ()
   })
 })
 
+test('a record that could not be indexed never rides along inside a passing run', async (t) => {
+  // Each case puts one unindexable record beside one good one, so the run has
+  // something to report a pass on. Nothing on these three paths sets the
+  // `incomplete` flag: the severity of the accompanying rule is the only thing
+  // between each of these runs and a green one, and a root holding a file the
+  // tool could not parse, or could not give an identity, must never pass.
+  await t.test('front matter that is opened and never closed', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeFile(join(directory, '0003-unterminated.md'), '---\nid: ADR-0003\nstatus: accepted\n', 'utf8')
+
+      const { report, index } = await indexDecisionRecords({ root: directory })
+
+      assert.equal(report.status, 'fail')
+      assert.notEqual(report.status, 'pass')
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId, finding.severity]),
+        [['0003-unterminated.md', 'front-matter-invalid', 'error']],
+      )
+      assert.equal(report.summary.errors, 1)
+      assert.equal(report.summary.skipped, 1)
+      assert.equal(report.summary.files, 2)
+      assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001'])
+    })
+  })
+
+  await t.test('a file with no front matter at all', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeFile(join(directory, '0004-notes.md'), '# Just notes\n\nNo front matter here.\n', 'utf8')
+
+      const { report, index } = await indexDecisionRecords({ root: directory })
+
+      assert.equal(report.status, 'fail')
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId, finding.severity]),
+        [['0004-notes.md', 'front-matter-missing', 'error']],
+      )
+      assert.equal(report.summary.skipped, 1)
+      assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001'])
+    })
+  })
+
+  await t.test('a record that declares no id', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeRecord(directory, '0005-noid.md', [
+        '---',
+        'title: Decision without an id',
+        'status: accepted',
+        'date: 2026-01-01',
+        'owners: [team]',
+        'systems: [core]',
+        '---',
+        '',
+        '# Decision without an id',
+        '',
+        '## Context',
+        'Because.',
+        '',
+        '## Decision',
+        'Do it.',
+        '',
+        '## Consequences',
+        'Consequences follow.',
+      ])
+
+      const { report, index } = await indexDecisionRecords({ root: directory })
+
+      assert.equal(report.status, 'fail')
+      assert.notEqual(report.status, 'pass')
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId, finding.severity]),
+        [['0005-noid.md', 'record-id-missing', 'error']],
+      )
+      assert.equal(report.summary.skipped, 1)
+      assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001'])
+    })
+  })
+})
+
 test('a record that is not UTF-8 is incomplete evidence, never a pass', async () => {
   await withTemporary(async (directory) => {
     await writeRecord(directory, '0001-a.md', record('ADR-0001'))

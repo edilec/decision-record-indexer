@@ -61,15 +61,43 @@ test('no severity literal is written at a finding construction site', async () =
   }
 })
 
-test('the failures this tool exists to catch are errors, not warnings', () => {
-  // Downgrading any of these turns a refusal into a green build.
-  assert.equal(RULE_SEVERITY['supersession-cycle'], 'error')
-  assert.equal(RULE_SEVERITY['supersession-target-missing'], 'error')
-  assert.equal(RULE_SEVERITY['supersession-self'], 'error')
-  assert.equal(RULE_SEVERITY['path-escapes-root'], 'error')
-  assert.equal(RULE_SEVERITY['record-not-utf8'], 'error')
-  assert.equal(RULE_SEVERITY['record-id-duplicate'], 'error')
-  assert.equal(RULE_SEVERITY['status-unknown'], 'error')
+test('every rule severity is pinned here, rule by rule', () => {
+  // The table and the documented catalog are asserted against each other, so a
+  // coordinated edit to both agrees with itself and passes. This is the third
+  // copy, written out by hand: a downgrade has to walk past an expectation that
+  // shares no source with either of them. Downgrading any `error` below turns a
+  // refusal into a green build -- a record that could not be parsed, could not
+  // enter the index, or was bounded out still reaches status pass.
+  assert.deepEqual({ ...RULE_SEVERITY }, {
+    'date-invalid': 'warning',
+    'directory-too-deep': 'error',
+    'front-matter-field-invalid': 'error',
+    'front-matter-invalid': 'error',
+    'front-matter-key-unknown': 'warning',
+    'front-matter-missing': 'error',
+    'front-matter-too-long': 'error',
+    'no-records-found': 'warning',
+    'owners-missing': 'warning',
+    'path-escapes-root': 'error',
+    'record-id-duplicate': 'error',
+    'record-id-mismatch': 'warning',
+    'record-id-missing': 'error',
+    'record-not-utf8': 'error',
+    'record-too-large': 'error',
+    'record-unreadable': 'error',
+    'section-missing': 'warning',
+    'status-missing': 'error',
+    'status-supersession-mismatch': 'warning',
+    'status-unknown': 'error',
+    'supersession-asymmetric': 'warning',
+    'supersession-cycle': 'error',
+    'supersession-self': 'error',
+    'supersession-target-missing': 'error',
+    'supersession-too-deep': 'error',
+    'systems-missing': 'info',
+    'title-missing': 'warning',
+    'too-many-records': 'error',
+  })
 })
 
 test('every table entry uses a severity the report contract defines', () => {

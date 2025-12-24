@@ -131,7 +131,8 @@ and inventing one would misrepresent the history.
 Severity is not written at the point a finding is constructed. It is read from a single frozen
 `RULE_SEVERITY` table in `src/index.mjs`, a rule missing from that table throws rather than
 defaulting to anything, and `test/severity-table.test.mjs` asserts this catalog and that table
-against each other in both directions.
+against each other in both directions. Because a coordinated edit to both would agree with itself,
+that file also pins every rule's severity rule by rule, independently of either.
 
 ## Limits
 

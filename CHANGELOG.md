@@ -58,8 +58,9 @@ All notable changes to this project are documented in this file.
 - A run that indexed no record is `incomplete` and exits 2. `pass` with
   `checked: 0` is not reachable.
 - Every finding takes its severity from one frozen `ruleId -> severity` table;
-  an unknown rule id throws, and the table is asserted against the documented
-  catalog in both directions.
+  an unknown rule id throws, the table is asserted against the documented
+  catalog in both directions, and every severity is additionally pinned rule by
+  rule, so downgrading a rule in both the table and the catalog is still caught.
 - No wall clock, locale, `localeCompare`, random source, network access or
   filesystem enumeration order affects the output.
 
