@@ -550,6 +550,71 @@ test('each documented limit is enforced and makes the run incomplete', async (t)
   })
 })
 
+test('a limit that bounds out one record beside an indexable one still makes the run incomplete', async (t) => {
+  // Every limit case above uses a root where the bounded-out record is the only
+  // record, so `no-records-found` marks the run incomplete on its own and hides
+  // whether the limit did. With a good record beside it the run has a real
+  // result to report, and the documented "run is incomplete" -- exit 2, not
+  // exit 1 -- rests on the flag the limit itself sets.
+  await t.test('maxDepth', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeRecord(directory, 'a/b/c/0002-deep.md', record('ADR-0002'))
+
+      const { report, index } = await indexDecisionRecords({ root: directory, limits: { maxDepth: 2 } })
+      assert.equal(report.status, 'incomplete')
+      assert.notEqual(report.status, 'fail')
+      assert.equal(report.summary.checked, 1)
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId]),
+        [['a/b/c', 'directory-too-deep']],
+      )
+      assert.equal(index.complete, false)
+    })
+  })
+
+  await t.test('maxRecordBytes', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeRecord(directory, '0002-big.md', [...record('ADR-0002'), 'x'.repeat(500)])
+
+      const { report, index } = await indexDecisionRecords({ root: directory, limits: { maxRecordBytes: 400 } })
+      assert.equal(report.status, 'incomplete')
+      assert.notEqual(report.status, 'fail')
+      assert.equal(report.summary.checked, 1)
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId]),
+        [['0002-big.md', 'record-too-large']],
+      )
+      assert.equal(index.complete, false)
+    })
+  })
+
+  await t.test('maxFrontMatterLines', async () => {
+    await withTemporary(async (directory) => {
+      await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+      await writeRecord(
+        directory,
+        '0002-long.md',
+        record('ADR-0002', Array.from({ length: 20 }, (unused, position) => `# padding line ${position}`)),
+      )
+
+      const { report, index } = await indexDecisionRecords({
+        root: directory,
+        limits: { maxFrontMatterLines: 10 },
+      })
+      assert.equal(report.status, 'incomplete')
+      assert.notEqual(report.status, 'fail')
+      assert.equal(report.summary.checked, 1)
+      assert.deepEqual(
+        report.findings.map((finding) => [finding.location.file, finding.ruleId]),
+        [['0002-long.md', 'front-matter-too-long']],
+      )
+      assert.equal(index.complete, false)
+    })
+  })
+})
+
 test('a symlink to a file outside the root is refused and its content never reaches the report', async () => {
   await withTemporary(async (outside) => {
     await writeFile(join(outside, 'secret.md'), '---\nid: OUTSIDE-1\n---\n\n# tangerine-passphrase\n', 'utf8')
