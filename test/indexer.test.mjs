@@ -615,6 +615,46 @@ test('a limit that bounds out one record beside an indexable one still makes the
   })
 })
 
+test('the walk reads decision records and skips exactly what the documentation says it skips', async () => {
+  await withTemporary(async (directory) => {
+    await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+    await writeRecord(directory, '0006-b.markdown', record('ADR-0006'))
+    await writeRecord(directory, '.0002-hidden.md', record('ADR-HIDDEN-FILE'))
+    await writeRecord(directory, '.archive/0003-hidden.md', record('ADR-HIDDEN-DIRECTORY'))
+    await writeRecord(directory, 'node_modules/0004-vendored.md', record('ADR-VENDORED'))
+    await writeRecord(directory, '0005-notes.txt', record('ADR-TEXT'))
+    await writeRecord(directory, 'index.md', record('ADR-INDEX'))
+    await writeRecord(directory, 'README.md', record('ADR-README'))
+    await writeRecord(directory, 'Template.md', record('ADR-TEMPLATE'))
+
+    const { report, index } = await indexDecisionRecords({ root: directory })
+
+    // Each skip rule is load-bearing in one direction and the other: dropping
+    // one indexes a file that is not a decision record, and widening one stops
+    // a real record from being read.
+    assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001', 'ADR-0006'])
+    assert.equal(report.summary.files, 2)
+    assert.equal(report.summary.skipped, 0)
+    assert.deepEqual(report.findings, [])
+    assert.equal(report.status, 'pass')
+  })
+})
+
+test('a non-regular entry that was never a record candidate stays skipped in silence', { skip: process.platform === 'win32' }, async () => {
+  // The counterpart to reporting a record-shaped FIFO: refusing every named
+  // pipe in the tree would fail runs over roots that are perfectly fine.
+  await withTemporary(async (directory) => {
+    await writeRecord(directory, '0001-a.md', record('ADR-0001'))
+    await makeFifo(join(directory, 'build.sock'))
+    await makeFifo(join(directory, 'index.md'))
+
+    const { report, index } = await indexDecisionRecords({ root: directory })
+    assert.equal(report.status, 'pass')
+    assert.deepEqual(report.findings, [])
+    assert.deepEqual(index.records.map((item) => item.id), ['ADR-0001'])
+  })
+})
+
 test('a symlink to a file outside the root is refused and its content never reaches the report', async () => {
   await withTemporary(async (outside) => {
     await writeFile(join(outside, 'secret.md'), '---\nid: OUTSIDE-1\n---\n\n# tangerine-passphrase\n', 'utf8')
