@@ -191,6 +191,12 @@ evidence, so `no-records-found` is emitted and the run is marked incomplete on t
 - Nothing reads the wall clock, the locale, the environment or the network. Two runs over the same
   bytes produce byte-identical stdout.
 
+Two runs inside one process and one locale agree with each other whatever the comparator does, so
+`test/determinism.test.mjs` pins the properties themselves: the comparator's own ordering against
+pairs an English collator orders the other way, each sort that stands between directory enumeration
+and the report, and the absence of `localeCompare`, the clock, a random source, the environment and
+the network from the shipped source.
+
 ## What this tool cannot conclude
 
 - Whether a decision was **correct**, or whether it is still being followed. It reads what the
