@@ -896,6 +896,59 @@ test('a record missing its descriptive metadata is reported field by field', asy
   })
 })
 
+test('a control character in a record never reaches the report or the index', async () => {
+  await withTemporary(async (directory) => {
+    const nul = String.fromCharCode(0)
+    const startOfHeading = String.fromCharCode(1)
+    await writeFile(
+      join(directory, '0001-a.md'),
+      [
+        '---',
+        'id: ADR-0001',
+        `status: bo${nul}gus${startOfHeading}`,
+        'owners: [team]',
+        'systems: [core]',
+        '---',
+        '',
+        '# Decision one',
+        '',
+        '## Context',
+        'x',
+        '',
+        '## Decision',
+        'y',
+        '',
+        '## Consequences',
+        'z',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const { report, index } = await indexDecisionRecords({ root: directory })
+    const control = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u2028\u2029]/
+
+    assert.deepEqual(
+      report.findings.map((finding) => [finding.ruleId, finding.message, finding.evidence]),
+      [[
+        'status-unknown',
+        'Status "bo gus" is outside the vocabulary proposed, accepted, rejected, deprecated, superseded.',
+        'bo gus',
+      ]],
+    )
+    assert.equal(index.records[0].status, 'bo gus')
+    for (const finding of report.findings) {
+      assert.equal(control.test(finding.message), false)
+      assert.equal(control.test(finding.evidence ?? ''), false)
+    }
+
+    // The human report goes straight to a terminal, so a control byte that
+    // survived would arrive there raw. JSON.stringify escapes it instead, which
+    // hides the defect rather than preventing it.
+    assert.equal(control.test(formatReport(report)), false)
+  })
+})
+
 test('formatReport renders each finding with its location, rule and message', async () => {
   await withTemporary(async (directory) => {
     await writeRecord(directory, '0001-a.md', record('ADR-0001', ['supersedes: [ADR-0001]']))

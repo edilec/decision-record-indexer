@@ -46,6 +46,26 @@ test('excerpt removes line and paragraph separators and bounds its output', () =
   assert.equal(excerpt('abcdefghij', 4), 'abcd...')
 })
 
+test('excerpt removes every control character, not only the ones a space class already collapses', () => {
+  // U+2028, U+2029, tab, newline and carriage return are all matched by \s, so
+  // collapsing whitespace hides them whether or not they were stripped first.
+  // A NUL or a C1 escape is not whitespace: it survives into a finding message
+  // and reaches a terminal raw unless it is removed here.
+  const nul = String.fromCharCode(0)
+  const startOfHeading = String.fromCharCode(1)
+  const del = String.fromCharCode(127)
+
+  assert.equal(excerpt(`bo${nul}gus${startOfHeading} X`), 'bo gus X')
+  assert.equal(excerpt(`a${del}b`), 'a b')
+
+  const everyControl =
+    Array.from({ length: 32 }, (unused, code) => String.fromCharCode(code)).join('') +
+    del + LINE_SEPARATOR + PARAGRAPH_SEPARATOR
+  const flattened = excerpt(`before${everyControl}after`)
+  assert.equal(flattened, 'before after')
+  assert.equal(/[\u0000-\u001f\u007f\u2028\u2029]/.test(flattened), false)
+})
+
 test('front matter extraction reports each way a block can be wrong', () => {
   assert.deepEqual(extractFrontMatter('# No front matter\n', 200), { ok: false, reason: 'missing' })
   assert.deepEqual(extractFrontMatter('---\nid: ADR-1\n', 200), { ok: false, reason: 'unterminated' })
@@ -132,6 +152,12 @@ test('a section excerpt stops at the next heading of the same or higher level', 
 test('dates are checked against the calendar, never against the clock', () => {
   assert.equal(isValidDate('2024-02-29'), true)
   assert.equal(isValidDate('2026-02-29'), false)
+  // The century rule, which divisibility by four alone gets wrong: 1900 and
+  // 2100 are not leap years, 2000 and 2400 are.
+  assert.equal(isValidDate('1900-02-29'), false)
+  assert.equal(isValidDate('2100-02-29'), false)
+  assert.equal(isValidDate('2000-02-29'), true)
+  assert.equal(isValidDate('2400-02-29'), true)
   assert.equal(isValidDate('2026-02-30'), false)
   assert.equal(isValidDate('2026-13-01'), false)
   assert.equal(isValidDate('2026-2-1'), false)
