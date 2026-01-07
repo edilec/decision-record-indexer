@@ -223,7 +223,9 @@ test('--index writes the derived index outside the root and leaves the records a
     await writeFile(join(root, '0001-a.md'), RECORD, 'utf8')
     const destination = join(directory, 'build', 'decisions.index.json')
 
-    const result = await cli(['--root', root, '--index', destination])
+    // --index-root declares the tree the index may be written into; it
+    // defaults to the working directory, and this one is a temporary directory.
+    const result = await cli(['--root', root, '--index', destination, '--index-root', directory])
     assert.equal(result.code, 0)
     assert.equal(result.stderr, 'index written: 1 record(s), complete=true\n')
 
