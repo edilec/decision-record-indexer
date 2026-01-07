@@ -4,6 +4,7 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import {
+  DestinationError,
   formatReport,
   indexDecisionRecords,
   resolveIndexDestination,
@@ -22,6 +23,8 @@ Usage:
 Options:
   --root DIR                 Directory holding the decision records (required)
   --index FILE               Write the derived index here; must be outside --root
+  --index-root DIR           Tree the index may be written into (default: the
+                             working directory); no meaning without --index
   --json                     Emit the machine-readable report on stdout
   --section NAME             Required section heading; repeat to declare the whole
                              set, replacing the default Context, Decision, Consequences
@@ -39,6 +42,11 @@ repeated to declare the whole required-section set.
 Records are read, never written. A superseded decision stays exactly as it is
 and stays in the index, with its successor recorded as "current"; the index is
 a derived artifact and the destination is refused if it lies inside --root.
+
+The destination is checked before anything is written, and refused if it is a
+symbolic link, if it resolves outside --index-root, if it is the same file as a
+record this run read -- compared by device and inode, so a hard link to a
+record is still that record -- or if it is not a regular file.
 
 A supersession cycle and a reference to a record that does not exist are both
 errors. A run that indexed no record is "incomplete", never a pass.
@@ -60,7 +68,7 @@ const LIMIT_FLAGS = new Map([
 
 function parseArguments(argv) {
   if (argv.includes('-h') || argv.includes('--help')) return { help: true }
-  const options = { root: null, index: null, json: false, sections: null, limits: {} }
+  const options = { root: null, index: null, indexRoot: null, json: false, sections: null, limits: {} }
   const given = new Set()
 
   /**
@@ -93,6 +101,9 @@ function parseArguments(argv) {
     } else if (argument === '--index') {
       once('--index')
       options.index = takeValue('--index')
+    } else if (argument === '--index-root') {
+      once('--index-root')
+      options.indexRoot = takeValue('--index-root')
     } else if (argument === '--section') {
       if (options.sections === null) options.sections = []
       options.sections.push(takeValue('--section'))
@@ -105,6 +116,9 @@ function parseArguments(argv) {
   }
 
   if (options.root === null) throw new Error('--root is required')
+  if (options.indexRoot !== null && options.index === null) {
+    throw new Error('--index-root has no meaning without --index')
+  }
   return options
 }
 
@@ -132,9 +146,16 @@ async function main(argv) {
   }
 
   let destination = null
+  let writeRootReal = null
   if (options.index !== null) {
     try {
-      destination = await resolveIndexDestination(rootReal, options.index)
+      writeRootReal = await realpath(resolve(options.indexRoot ?? process.cwd()))
+    } catch (error) {
+      process.stderr.write(`--index-root could not be read: ${error.code ?? error.message}\n`)
+      return 2
+    }
+    try {
+      destination = await resolveIndexDestination(rootReal, options.index, writeRootReal)
     } catch (error) {
       process.stderr.write(`--index is not usable: ${error.message}\n`)
       return 2
@@ -143,6 +164,7 @@ async function main(argv) {
 
   let report
   let index
+  let sources
   try {
     const result = await indexDecisionRecords({
       root: options.root,
@@ -151,16 +173,30 @@ async function main(argv) {
     })
     report = result.report
     index = result.index
+    sources = result.sources
   } catch (error) {
     process.stderr.write(`${error.message}\n`)
     return 2
   }
 
+  /**
+   * The destination is checked again here, immediately before the write and
+   * now knowing which files were read. Configuration time could not do the
+   * last of the three checks: a hard link to a record has no target to resolve
+   * and shares no path with it, so only device plus inode sees that it is the
+   * same file -- and this tool overwrote a decision record that way, exiting 0
+   * and reporting "index written". A refused destination is a configuration
+   * error, so stdout stays empty.
+   */
   if (destination !== null) {
     try {
-      await writeIndexFile(destination, index)
+      await writeIndexFile(destination, index, { inputs: sources, root: writeRootReal })
       process.stderr.write(`index written: ${index.counts.records} record(s), complete=${index.complete}\n`)
     } catch (error) {
+      if (error instanceof DestinationError) {
+        process.stderr.write(`--index is not usable: ${error.message}\n`)
+        return 2
+      }
       process.stderr.write(`index could not be written: ${error.code ?? error.message}\n`)
       return 2
     }

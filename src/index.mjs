@@ -16,10 +16,11 @@
  *    points at nothing, is not a history anyone can follow.
  */
 
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 
 import { buildSupersessionGraph } from './graph.mjs'
+import { assertWritableDestination } from './write-guard.mjs'
 import {
   DEFAULT_SECTIONS,
   STATUS_VALUES,
@@ -158,14 +159,29 @@ export function validateSections(sections) {
  * is resolved and the remaining segments are appended to it. That still
  * defeats a symlinked parent directory, which is the way a "separate
  * destination" quietly becomes a file written into the archive.
+ *
+ * `writeRootReal`, when given, is the real path of the tree the index may be
+ * written into. It is checked here as well as in the write guard because this
+ * runs before any directory is created: a destination whose parent does not
+ * exist yet would otherwise have its parent created outside that tree before
+ * the guard refused the write.
  */
-export async function resolveIndexDestination(rootReal, destination) {
+export async function resolveIndexDestination(rootReal, destination, writeRootReal = null) {
   if (typeof destination !== 'string' || destination.trim() === '') {
     throw new TypeError('Index destination must be a non-empty path')
   }
   const absolute = resolve(destination)
-  const tail = []
-  let probe = absolute
+
+  /**
+   * The probe starts at the PARENT, never at the destination itself. Calling
+   * `realpath` on the destination resolves a symbolic link sitting there, and
+   * resolving it is the dangerous act: the caller would be handed the link's
+   * target and would write through a link nobody named. The last segment is
+   * therefore always carried as a tail segment, and a symbolic link at the
+   * destination is refused on sight by the write guard instead.
+   */
+  const tail = [basename(absolute)]
+  let probe = dirname(absolute)
   let realBase = null
 
   for (let step = 0; step < ANCESTOR_PROBE_LIMIT; step += 1) {
@@ -184,17 +200,40 @@ export async function resolveIndexDestination(rootReal, destination) {
   }
   if (realBase === null) throw new TypeError('Index destination is nested too deeply to resolve')
 
-  const resolved = tail.length === 0 ? realBase : join(realBase, ...tail)
+  const resolved = join(realBase, ...tail)
   if (isInside(rootReal, resolved)) {
     throw new TypeError(
       'Index destination is inside the decision record root; the index is a derived artifact and must be written elsewhere',
     )
   }
-  if (tail.length === 0) {
-    const info = await stat(resolved)
-    if (info.isDirectory()) throw new TypeError('Index destination is a directory, not a file')
+  if (writeRootReal !== null && !isInside(writeRootReal, resolved)) {
+    throw new TypeError(
+      `Index destination resolves to ${resolved}, which is outside the permitted root. `
+      + 'A link or a ".." segment on the way there does not widen it. '
+      + 'Pass --index-root to declare the tree the index may be written into.',
+    )
   }
-  return resolved
+  // lstat, not stat: a symbolic link aimed at a directory is refused as a link
+  // by the write guard, with the reason that actually applies to it.
+  let entry = null
+  try {
+    entry = await lstat(resolved)
+  } catch {
+    entry = null
+  }
+  if (entry !== null && entry.isDirectory()) {
+    throw new TypeError('Index destination is a directory, not a file')
+  }
+
+  /**
+   * The path as named is returned, not the resolved one. Containment has to be
+   * decided on the resolved path, but handing that back to the caller hands
+   * back a path with the symlink already followed: writing to it goes straight
+   * through the link the caller never asked for, which is how a destination
+   * named inside the working tree overwrote the file it pointed at. The write
+   * guard lstats what it is given, so it must be given what the caller named.
+   */
+  return absolute
 }
 
 function createCollector() {
@@ -830,7 +869,14 @@ export async function indexDecisionRecords(options = {}) {
     findings,
   }
 
-  return { report, index }
+  /**
+   * `sources` is the real path of every record file this run actually read.
+   * The caller needs it to prove the index destination is not one of them: a
+   * hard link to a record has no target to resolve and shares no path with it,
+   * so only device plus inode sees that it is the same file. This tool
+   * destroyed a decision record exactly that way before the check existed.
+   */
+  return { report, index, sources: files.map((entry) => entry.realPath) }
 }
 
 const SEARCH_KEYS = Object.freeze(['owner', 'status', 'system', 'tag', 'text'])
@@ -878,11 +924,32 @@ export function searchIndex(index, query = {}) {
   return matches.slice().sort((left, right) => byCodeUnit(left.id, right.id))
 }
 
-/** Serialise the derived index to its own destination. Records are never touched. */
-export async function writeIndexFile(destination, index) {
-  await mkdir(dirname(destination), { recursive: true })
-  await writeFile(destination, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
-  return destination
+/**
+ * Serialise the derived index to its own destination. Records are never
+ * touched -- and that promise is enforced here, at the only place this package
+ * writes anything, rather than left to each caller.
+ *
+ * The destination is checked immediately before the write, because a path is
+ * not a file: a symbolic link there puts the index wherever the link points, a
+ * symlinked parent does the same one level up, and a hard link to a record
+ * shares no path with it but is the same file. This tool overwrote a decision
+ * record through the third of those and exited 0 reporting "index written".
+ *
+ * Missing parent directories are still created, so `--index build/index.json`
+ * works on a fresh checkout; `root` is what stops that from happening outside
+ * the tree the caller declared.
+ */
+export async function writeIndexFile(destination, index, options = {}) {
+  const { inputs = [], root = null } = options
+  await mkdir(dirname(resolve(destination)), { recursive: true })
+  const target = await assertWritableDestination(destination, {
+    inputs,
+    root,
+    label: '--index',
+    rootLabel: '--index-root',
+  })
+  await writeFile(target, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
+  return target
 }
 
 const SEVERITY_WIDTH = 7
@@ -911,3 +978,4 @@ export {
   parseRecord,
 } from './parse.mjs'
 export { buildSupersessionGraph, canonicalCycle, findCycles, resolveCurrent } from './graph.mjs'
+export { DestinationError, assertWritableDestination } from './write-guard.mjs'
