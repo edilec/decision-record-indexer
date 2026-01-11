@@ -28,6 +28,13 @@ rewrite. A superseded decision is the history that explains why the current one 
 that reads it has no write path into it. The derived index goes to `--index`, which is refused if
 it resolves inside the root.
 
+That refusal is not enough on its own, because a path is not a file. `--index` is also refused, with
+exit `2` and empty stdout, when it is a symbolic link (refused on sight by `lstat`, since resolving
+the link is the dangerous act — including a link aimed at a path that does not exist yet), when its
+parent resolves outside `--index-root`, when it is the same file as a record this run read (compared
+by device and inode, so a hard link to a record is still that record), or when it is not a regular
+file. Each of those was measured overwriting a file while the run exited `0`.
+
 ## Front matter
 
 Front matter is a block delimited by a line containing only `---` at the very start of the file

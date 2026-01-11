@@ -50,6 +50,7 @@ decision-record-indexer --root docs/decisions --section Context --section "Rollb
 ```
   --root DIR                 Directory holding the decision records (required)
   --index FILE               Write the derived index here; must be outside --root
+  --index-root DIR           Tree the index may be written into (default: cwd)
   --json                     Emit the machine-readable report on stdout
   --section NAME             Required section heading; repeat to declare the whole set
   --max-records N            Maximum records to index (default 2000)
@@ -59,6 +60,24 @@ decision-record-indexer --root docs/decisions --section Context --section "Rollb
   --max-chain-depth N        Maximum supersession traversal depth (default 64)
   -h, --help                 Show this help
 ```
+
+### The index destination is checked before anything is written
+
+A path is not a file. `--index` is refused, with exit `2` and nothing on
+stdout, when it is any of these:
+
+| Refused | Why |
+| --- | --- |
+| A symbolic link | The index would land wherever the link points, not on the path you named. Refused on sight by `lstat`, because resolving the link is itself the dangerous act. A link aimed at a path that does not exist yet is refused for the same reason. |
+| Resolving outside `--index-root` | A symlinked directory, or a `..` segment, on the way there does not widen the permitted tree. The parent is resolved and compared, never compared as text. |
+| The same file as a record this run read | Compared by device and inode, so a hard link to a decision record is still that record. |
+| Inside `--root` | The index is a derived artifact; the archive is read-only. |
+| Not a regular file | A directory is not an output file. |
+
+`--index-root` declares the tree the index may be written into and defaults to
+the working directory. Missing directories below it are still created, so
+`--index build/decisions.index.json` works on a fresh checkout. The option has
+no meaning without `--index`.
 
 stdout carries the report and nothing else; diagnostics go to stderr. Every option that carries a
 value may be given only once — a repeated flag is a configuration error rather than a silent

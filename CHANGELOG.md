@@ -4,7 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `--index` could destroy a file the tool was never asked to write to, and the
+  run exited `0` reporting `index written`. Reproduced four ways before the fix:
+  a symbolic link at the destination replaced the file it pointed at, a link
+  aimed at a path that did not exist created that file outside the archive, a
+  symlinked parent directory did the same one level up, and a hard link to a
+  decision record overwrote the record itself — the one thing this tool
+  promises never to write to. The destination is now checked immediately before
+  the write by `assertWritableDestination`: a symbolic link is refused on sight
+  by `lstat`, the parent is resolved and compared against `--index-root`, and
+  identity against every record the run read is compared by device and inode.
+  A refused destination exits `2` with empty stdout.
+- `resolveIndexDestination` returned the destination with its own symbolic link
+  already resolved, which handed the caller a path that writes through a link
+  nobody named. It now decides containment on the resolved path and returns the
+  path as named, and probes ancestors from the parent so the destination itself
+  is never passed to `realpath`.
+
 ### Added
+
+- `--index-root`, the tree `--index` may be written into. It defaults to the
+  working directory, still creates missing directories below itself, and has no
+  meaning without `--index`.
+- `sources` on the result of `indexDecisionRecords`: the real path of every
+  record file the run read, which is what proves a destination is not one of
+  them.
 
 - a front matter parser for the documented subset — scalars, inline lists, block
   lists and full-line comments — that reports nested mappings, tab indentation,
