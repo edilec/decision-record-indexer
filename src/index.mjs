@@ -16,11 +16,11 @@
  *    points at nothing, is not a history anyone can follow.
  */
 
-import { lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 
 import { buildSupersessionGraph } from './graph.mjs'
-import { assertWritableDestination } from './write-guard.mjs'
+import { DestinationError, assertWritableDestination } from './write-guard.mjs'
 import {
   DEFAULT_SECTIONS,
   STATUS_VALUES,
@@ -153,6 +153,42 @@ export function validateSections(sections) {
 }
 
 /**
+ * Resolve a path that does not exist yet, without resolving its own last
+ * segment.
+ *
+ * The probe starts at the PARENT, never at the path itself. Calling `realpath`
+ * on the destination resolves a symbolic link sitting there, and resolving it
+ * is the dangerous act: the caller would be handed the link's target and would
+ * write through a link nobody named. The last segment is therefore always
+ * carried as a tail segment, and a symbolic link at the destination is refused
+ * on sight by the write guard instead.
+ *
+ * The nearest existing ancestor is what a containment check has to be decided
+ * on, because `mkdir` with `recursive` walks through a symlinked parent as
+ * happily as through a real one: a check made after the directory exists is a
+ * check made after the directory was created outside the root.
+ */
+async function resolveThroughExistingAncestor(absolute) {
+  const tail = [basename(absolute)]
+  let probe = dirname(absolute)
+
+  for (let step = 0; step < ANCESTOR_PROBE_LIMIT; step += 1) {
+    try {
+      return join(await realpath(probe), ...tail)
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
+        throw new TypeError(`Index destination could not be resolved: ${error.code ?? 'unknown error'}`)
+      }
+      const parent = dirname(probe)
+      if (parent === probe) throw new TypeError('Index destination has no existing ancestor directory')
+      tail.unshift(basename(probe))
+      probe = parent
+    }
+  }
+  throw new TypeError('Index destination is nested too deeply to resolve')
+}
+
+/**
  * Resolve the index destination and refuse anything inside the record root.
  *
  * The destination usually does not exist yet, so the nearest existing ancestor
@@ -171,36 +207,7 @@ export async function resolveIndexDestination(rootReal, destination, writeRootRe
     throw new TypeError('Index destination must be a non-empty path')
   }
   const absolute = resolve(destination)
-
-  /**
-   * The probe starts at the PARENT, never at the destination itself. Calling
-   * `realpath` on the destination resolves a symbolic link sitting there, and
-   * resolving it is the dangerous act: the caller would be handed the link's
-   * target and would write through a link nobody named. The last segment is
-   * therefore always carried as a tail segment, and a symbolic link at the
-   * destination is refused on sight by the write guard instead.
-   */
-  const tail = [basename(absolute)]
-  let probe = dirname(absolute)
-  let realBase = null
-
-  for (let step = 0; step < ANCESTOR_PROBE_LIMIT; step += 1) {
-    try {
-      realBase = await realpath(probe)
-      break
-    } catch (error) {
-      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
-        throw new TypeError(`Index destination could not be resolved: ${error.code ?? 'unknown error'}`)
-      }
-      const parent = dirname(probe)
-      if (parent === probe) throw new TypeError('Index destination has no existing ancestor directory')
-      tail.unshift(basename(probe))
-      probe = parent
-    }
-  }
-  if (realBase === null) throw new TypeError('Index destination is nested too deeply to resolve')
-
-  const resolved = join(realBase, ...tail)
+  const resolved = await resolveThroughExistingAncestor(absolute)
   if (isInside(rootReal, resolved)) {
     throw new TypeError(
       'Index destination is inside the decision record root; the index is a derived artifact and must be written elsewhere',
@@ -935,21 +942,61 @@ export function searchIndex(index, query = {}) {
  * shares no path with it but is the same file. This tool overwrote a decision
  * record through the third of those and exited 0 reporting "index written".
  *
- * Missing parent directories are still created, so `--index build/index.json`
- * works on a fresh checkout; `root` is what stops that from happening outside
- * the tree the caller declared.
+ * Two things the destination check alone does not cover, each measured here:
+ *
+ * - `mkdir` runs before the destination can be inspected, and with `recursive`
+ *   it walks a symlinked parent as happily as a real one. Checking `root`
+ *   after it has run checks nothing: it created a directory outside the root
+ *   and then refused the write. Containment is therefore decided first, on the
+ *   nearest ancestor that exists.
+ * - `inputs` can only hold the records this run actually read, so a hard link
+ *   to a file inside the root that the walk never opened -- a README it skips,
+ *   a note with the wrong extension, a record bounded out by `maxRecords` --
+ *   is invisible to the identity check. Writing in place rewrote that file
+ *   through the shared inode, exit 0, "index written". The index is written to
+ *   a temporary file and renamed over the destination instead, so the write
+ *   replaces the NAME: every other name for the old file keeps its content.
+ *
+ * Missing parent directories are still created below the root, so
+ * `--index build/index.json` works on a fresh checkout.
  */
 export async function writeIndexFile(destination, index, options = {}) {
   const { inputs = [], root = null } = options
-  await mkdir(dirname(resolve(destination)), { recursive: true })
-  const target = await assertWritableDestination(destination, {
+  const target = resolve(destination)
+
+  if (root !== null) {
+    const base = await realpath(resolve(root))
+    const through = await resolveThroughExistingAncestor(target)
+    if (!isInside(base, through)) {
+      throw new DestinationError(
+        `--index resolves to ${through}, which is outside the permitted root. `
+        + 'A link or a ".." segment on the way there does not widen it. '
+        + 'Pass --index-root to declare the tree the index may be written into.',
+      )
+    }
+  }
+
+  await mkdir(dirname(target), { recursive: true })
+  const checked = await assertWritableDestination(destination, {
     inputs,
     root,
     label: '--index',
     rootLabel: '--index-root',
   })
-  await writeFile(target, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
-  return target
+
+  // `wx` so an existing entry at the temporary name is never written through,
+  // and `created` so a failure never deletes a file this run did not make.
+  const temporary = join(dirname(checked), `.${basename(checked)}.${process.pid}.tmp`)
+  let created = false
+  try {
+    await writeFile(temporary, `${JSON.stringify(index, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
+    created = true
+    await rename(temporary, checked)
+    created = false
+  } finally {
+    if (created) await rm(temporary, { force: true })
+  }
+  return checked
 }
 
 const SEVERITY_WIDTH = 7
