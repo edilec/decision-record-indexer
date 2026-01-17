@@ -7,6 +7,8 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { indexDecisionRecords, writeIndexFile } from '../src/index.mjs'
+
 /*
  * These drive the real CLI rather than calling the guard directly. A guard
  * asserted through its own exported function is defended by a declaration; an
@@ -23,6 +25,12 @@ import { promisify } from 'node:util'
  *
  * The allowed cases are not optional: a guard that refuses every destination
  * passes a data-loss test while making --index useless.
+ *
+ * Two of these are not destination checks at all, because two of the measured
+ * losses could not be closed by one: `inputs` can only name the records the
+ * run actually read, and `mkdir` runs before anything can be inspected. The
+ * last two cases below pin those, and they are the ones that fail if the
+ * rename or the pre-mkdir containment check goes away.
  */
 
 const run = promisify(execFile)
@@ -254,4 +262,49 @@ test('a write root the operator widens covers what it names', async (t) => {
   const allowed = await index(space, destination, ['--index-root', space.base])
   assert.equal(allowed.code, 0)
   assert.equal(JSON.parse(await readFile(destination, 'utf8')).counts.records, 1)
+})
+
+test('a hard link to a file the walk never read keeps its content', async (t) => {
+  const space = await workspace(t)
+  /*
+   * The walk skips a README by name, so it is never read, so it can never be
+   * one of the `inputs` the identity check compares inodes against. Measured
+   * before the index was written by rename: `--index` at a hard link to this
+   * README replaced the README with the 5 kB index and exited 0 reporting
+   * "index written". A rename replaces the NAME, so the other name for that
+   * file keeps its content -- which is the only thing that covers a file the
+   * run never opened.
+   */
+  const readme = join(space.records, 'README.md')
+  await writeFile(readme, BYSTANDER, 'utf8')
+  const destination = join(space.work, 'index.json')
+  await link(readme, destination)
+
+  const result = await index(space, 'index.json')
+  assert.equal(result.code, 0)
+  assert.equal(await readFile(readme, 'utf8'), BYSTANDER)
+  assert.equal(JSON.parse(await readFile(destination, 'utf8')).counts.records, 1)
+})
+
+test('writeIndexFile decides containment before it creates a directory', async (t) => {
+  const space = await workspace(t)
+  /*
+   * This one calls the library, because the CLI resolves the destination
+   * before it calls in and would hide the hole. `writeIndexFile` is documented
+   * public API and says the destination check is enforced there so no caller
+   * can skip it -- but `mkdir` with `recursive` runs first and walks a
+   * symlinked parent as happily as a real one. Measured: the directory was
+   * created outside `root`, and only then was the write refused.
+   */
+  await symlink(space.elsewhere, join(space.work, 'link'))
+  const { index: built, sources } = await indexDecisionRecords({ root: space.records })
+
+  await assert.rejects(
+    () => writeIndexFile(join(space.work, 'link', 'made-up', 'index.json'), built, {
+      inputs: sources,
+      root: space.work,
+    }),
+    (error) => error.name === 'DestinationError' && /outside the permitted root/.test(error.message),
+  )
+  assert.deepEqual(await readdir(space.elsewhere), [])
 })
