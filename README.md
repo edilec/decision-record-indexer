@@ -79,6 +79,21 @@ the working directory. Missing directories below it are still created, so
 `--index build/decisions.index.json` works on a fresh checkout. The option has
 no meaning without `--index`.
 
+That table is what a check on the destination can see. It cannot see a file the
+run never opened — a README the walk skips by name, a note with the wrong
+extension, a record bounded out by `--max-records` — because none of those is
+one of the inputs, so a hard link to one is indistinguishable from any other
+path. The index is therefore written to a temporary file and renamed over the
+destination: a rename replaces the *name*, so every other name for the file
+that was there keeps its content. Measured before that change, `--index` at a
+hard link to a skipped README replaced the README with the index and exited
+`0`.
+
+Containment is decided before any directory is created, not after. `mkdir` with
+`recursive` walks a symlinked parent as happily as a real one, so a check made
+once the directory exists is a check made after it was created outside the
+root.
+
 stdout carries the report and nothing else; diagnostics go to stderr. Every option that carries a
 value may be given only once — a repeated flag is a configuration error rather than a silent
 last-wins — and `--section` is the exception, repeated to declare the whole required-section set.

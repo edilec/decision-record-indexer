@@ -22,6 +22,19 @@ All notable changes to this project are documented in this file.
   nobody named. It now decides containment on the resolved path and returns the
   path as named, and probes ancestors from the parent so the destination itself
   is never passed to `realpath`.
+- A hard link to a file inside the record root that the run never opened still
+  destroyed that file, and exited `0` reporting `index written`. The identity
+  check can only compare against the records the run actually read, so a README
+  the walk skips by name, a note with the wrong extension, or a record bounded
+  out by `--max-records` was invisible to it, and the in-place write rewrote
+  the file through the shared inode. The index is now written to a temporary
+  file and renamed over the destination, so the write replaces the name and
+  every other name for the old file keeps its content.
+- `writeIndexFile` created missing parent directories before it checked
+  containment, so a destination reached through a symlinked parent had a
+  directory created outside `root` and only then was refused. Its own
+  documentation claimed `root` prevented that. Containment is now decided on
+  the nearest existing ancestor, before `mkdir` runs.
 
 ### Added
 
