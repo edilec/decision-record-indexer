@@ -244,7 +244,7 @@ export async function resolveIndexDestination(rootReal, destination, writeRootRe
 }
 
 function createCollector() {
-  return { rows: [], incomplete: false }
+  return { rows: [], incomplete: false, namedInputs: [] }
 }
 
 function record(collector, row) {
@@ -298,6 +298,14 @@ async function collectRecordFiles(rootReal, limits, collector) {
       if (entry.name.startsWith('.')) continue
       const childRelative = relativePath === '' ? entry.name : `${relativePath}/${entry.name}`
       const childAbsolute = join(absolute, entry.name)
+
+      // A record-shaped name is an input even when its link is dangling and
+      // its content cannot be indexed. Keep the name before realpath so the
+      // output guard can refuse an index that would make it newly readable.
+      if (RECORD_EXTENSIONS.includes(extname(entry.name).toLowerCase())
+          && !SKIPPED_FILENAMES.includes(entry.name.toLowerCase())) {
+        collector.namedInputs.push(childAbsolute)
+      }
 
       // Resolve and inspect in one step: an entry whose real path cannot be
       // obtained is unknown evidence, and unknown evidence is never a pass.
@@ -877,13 +885,15 @@ export async function indexDecisionRecords(options = {}) {
   }
 
   /**
-   * `sources` is the real path of every record file this run actually read.
-   * The caller needs it to prove the index destination is not one of them: a
-   * hard link to a record has no target to resolve and shares no path with it,
-   * so only device plus inode sees that it is the same file. This tool
-   * destroyed a decision record exactly that way before the check existed.
+   * `sources` includes every discovered record-shaped name, even one that
+   * failed to resolve, and every real path read. These are guard inputs, not
+   * a claim that each candidate was indexed successfully. Names catch an
+   * index alias through a dangling symlink; real paths and inode checks catch
+   * hard links to records the run read.
    */
-  return { report, index, sources: files.map((entry) => entry.realPath) }
+  const sources = [...new Set([...collector.namedInputs, ...files.map((entry) => entry.realPath)])]
+    .sort(byCodeUnit)
+  return { report, index, sources }
 }
 
 const SEARCH_KEYS = Object.freeze(['owner', 'status', 'system', 'tag', 'text'])

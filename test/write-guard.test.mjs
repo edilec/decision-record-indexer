@@ -224,6 +224,50 @@ test('a plain new file in the write root is allowed', async (t) => {
   assert.deepEqual(written.records.map((item) => item.id), ['ADR-0001'])
 })
 
+test('a distinct dangling record link remains unreadable while an incomplete index is written', async (t) => {
+  const space = await workspace(t)
+  const named = join(space.records, 'linked.md')
+  await symlink('../work/other-missing.json', named)
+
+  const result = await index(space, 'index.json')
+  assert.equal(result.code, 2)
+  assert.equal(JSON.parse(result.stdout).status, 'incomplete')
+  assert.equal(JSON.parse(result.stdout).findings.some((finding) => finding.ruleId === 'record-unreadable'), true)
+  assert.match(result.stderr, /index written/)
+  assert.equal(JSON.parse(await readFile(join(space.work, 'index.json'), 'utf8')).counts.records, 1)
+  await assert.rejects(() => readFile(named, 'utf8'), { code: 'ENOENT' })
+})
+
+test('a dangling record link to a new index is refused before writing', async (t) => {
+  const space = await workspace(t)
+  const named = join(space.records, 'linked.md')
+  await symlink('../work/index.json', named)
+
+  const result = await index(space, 'index.json')
+  assert.equal(result.code, 2)
+  assert.equal(result.stdout, '')
+  assert.match(result.stderr, /--index names an input path/)
+  assert.doesNotMatch(result.stderr, /index written/)
+  await assert.rejects(() => readFile(join(space.work, 'index.json')), { code: 'ENOENT' })
+  await assert.rejects(() => readFile(named), { code: 'ENOENT' })
+})
+
+test('two dangling record-link hops to a new index are refused', async (t) => {
+  const space = await workspace(t)
+  const named = join(space.records, 'linked.md')
+  const middle = join(space.records, 'middle.md')
+  await symlink('middle.md', named)
+  await symlink('../work/index.json', middle)
+
+  const result = await index(space, 'index.json')
+  assert.equal(result.code, 2)
+  assert.equal(result.stdout, '')
+  assert.match(result.stderr, /--index names an input path/)
+  assert.doesNotMatch(result.stderr, /index written/)
+  await assert.rejects(() => readFile(join(space.work, 'index.json')), { code: 'ENOENT' })
+  await assert.rejects(() => readFile(named), { code: 'ENOENT' })
+})
+
 test('a real subdirectory of the write root is allowed', async (t) => {
   const space = await workspace(t)
 

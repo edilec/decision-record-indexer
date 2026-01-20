@@ -71,6 +71,7 @@ stdout, when it is any of these:
 | A symbolic link | The index would land wherever the link points, not on the path you named. Refused on sight by `lstat`, because resolving the link is itself the dangerous act. A link aimed at a path that does not exist yet is refused for the same reason. |
 | Resolving outside `--index-root` | A symlinked directory, or a `..` segment, on the way there does not widen the permitted tree. The parent is resolved and compared, never compared as text. |
 | The same file as a record this run read | Compared by device and inode, so a hard link to a decision record is still that record. |
+| A newly created index named by a dangling record link | Every discovered record-shaped path is retained as a guard input before it is resolved. Final symlink targets are compared with the destination, including when either file does not yet exist. A link to a different missing file remains an incomplete input, not a write refusal. |
 | Inside `--root` | The index is a derived artifact; the archive is read-only. |
 | Not a regular file | A directory is not an output file. |
 
@@ -79,11 +80,11 @@ the working directory. Missing directories below it are still created, so
 `--index build/decisions.index.json` works on a fresh checkout. The option has
 no meaning without `--index`.
 
-That table is what a check on the destination can see. It cannot see a file the
-run never opened — a README the walk skips by name, a note with the wrong
-extension, a record bounded out by `--max-records` — because none of those is
-one of the inputs, so a hard link to one is indistinguishable from any other
-path. The index is therefore written to a temporary file and renamed over the
+The guard receives every discovered record-shaped name, including an unreadable
+one, but the report counts only records actually indexed. It cannot see a file
+the run never treated as a record candidate — a README the walk skips by name
+or a note with the wrong extension — so a hard link to one is indistinguishable
+from any other path. The index is therefore written to a temporary file and renamed over the
 destination: a rename replaces the *name*, so every other name for the file
 that was there keeps its content. Measured before that change, `--index` at a
 hard link to a skipped README replaced the README with the index and exited
