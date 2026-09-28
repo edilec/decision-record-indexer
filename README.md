@@ -34,17 +34,19 @@ Superseded records stay in the index with their full metadata and stay returned 
 ## Install
 
 ```sh
-npm install decision-record-indexer
+npm install github:edilec/decision-record-indexer
 ```
+
+This installs the public GitHub source; `decision-record-indexer` is not published to npm.
 
 Requires Node 22 or newer.
 
 ## Command line
 
 ```sh
-decision-record-indexer --root docs/decisions
-decision-record-indexer --root docs/decisions --index build/decisions.index.json --json
-decision-record-indexer --root docs/decisions --section Context --section "Rollback plan"
+npx decision-record-indexer --root docs/decisions
+npx decision-record-indexer --root docs/decisions --index build/decisions.index.json --json
+npx decision-record-indexer --root docs/decisions --section Context --section "Rollback plan"
 ```
 
 ```
