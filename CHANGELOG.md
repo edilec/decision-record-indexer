@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.0 — 2026-10-14
 
 ### Fixed
 
@@ -103,4 +103,4 @@ All notable changes to this project are documented in this file.
 - No wall clock, locale, `localeCompare`, random source, network access or
   filesystem enumeration order affects the output.
 
-No release has been published.
+GitHub source release v0.1.0 — 2026-10-14.
